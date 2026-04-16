@@ -1,0 +1,213 @@
+---
+title: "exercise-11"
+format: html
+date: 4-13-26
+---
+
+
+
+```{r}
+library(naniar)
+library(tidyverse)
+library(skimr)
+library(ggplot2)
+
+f <- "https://raw.githubusercontent.com/difiore/ada-datasets/main/Mammal_lifehistories_v2.txt"
+
+d <- read_tsv(f, col_names = TRUE)
+head(d)
+names(d)
+skim(d)
+
+#there are four character variables and 10 numeric variables. Character variables are order, family, genus, species and numeric variables are mass, gestation, newborn, weaning, wean mass, AFR, max. life, litter size, litters/year, refs
+
+```
+
+# Challenge 
+
+#### Step 1 
+
+replace all values of -999 with NA
+
+```{r}
+
+d <- d %>%
+  replace_with_na_all(condition = ~.x == -999)
+
+
+```
+
+
+#### Step 2 
+
+drop the variables litter size and refs
+rename the variable max.life(mo) to maxlife(mo)
+rename the variable wean mass(g) to weanmass(g)
+
+```{r}
+
+d1 <- d %>%
+  select(-c("litter size","refs")) %>%
+  rename("maxlife(mo)" = `max. life(mo)`) %>%
+  rename("weanmass(g)" = `wean mass(g)`)
+
+
+```
+
+#### Step 3
+
+log transform al of the other numeric variables 
+
+```{r}
+
+d2 <- d1 %>%
+  mutate(across(where(is.numeric), log))
+
+
+```
+
+#### Step 4 
+
+Regress the (now log transformed) age [gestation(mo), weaning(mo), AFR(mo) (i.e., age at first reproduction), and maxlife(mo) (i.e., maximum lifespan)] and mass [newborn(g) and weanmass(g)] variables on (now log transformed) overall body mass(g) and add the residuals to the dataframe as new variables [relGest, relWean, relAFR, relLife, relNewbornMass, and relWeaningMass].
+
+```{r}
+
+m_Gest <- lm(`gestation(mo)` ~  `mass(g)`, data = d2, na.action = na.exclude)
+m_wean <- lm(`weaning(mo)` ~  `mass(g)`, data = d2, na.action = na.exclude)
+m_AFR <- lm(`AFR(mo)` ~  `mass(g)`, data = d2, na.action = na.exclude)
+m_maxlife <- lm(`maxlife(mo)` ~  `mass(g)`, data = d2, na.action = na.exclude)
+m_newborn <- lm(`newborn(g)` ~ `mass(g)`, data = d2, na.action = na.exclude)
+m_weanmass <- lm(`weanmass(g)` ~ `mass(g)`, data = d2, na.action = na.exclude)
+
+
+d3 <- d2 %>% mutate(relGest = resid(m_Gest),
+                  relWean = resid(m_wean),
+                  relAFR = resid(m_AFR),
+                  relLife = resid(m_maxlife),
+                  relNewbornMass = resid(m_newborn),
+                  relWeaningMass = resid(m_weanmass))
+
+
+```
+
+#### Step 5 
+
+Plot residuals of max lifespan (relLife) in relation to Order. Which mammalian orders have the highest residual lifespan?
+Plot residuals of newborn mass (relNewbornMass) in relation to Order. Which mammalian orders have the have highest residual newborn mass?
+Plot residuals of weaning mass (relWeaningMass) in relation to Order. Which mammalian orders have the have highest residual weaning mass?
+
+```{r}
+
+p1 <- ggplot(data = d3, aes(y = relLife, x = order)) +
+  geom_boxplot() +
+  geom_jitter() +
+  theme_classic() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+#the primates have the highest residual lifespan. 
+p2 <- ggplot(data = d3, aes(y = relNewbornMass, x = order)) +
+  geom_boxplot() +
+  #geom_jitter() +
+  theme_classic() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+#Cetacea and Macroscelidea have the highest residual newborn mass
+
+p3 <- ggplot(data = d3, aes(y = relWeaningMass, x = order)) +
+  geom_boxplot() +
+  geom_jitter() +
+  theme_classic() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+#Perissodactyla, Cetacea and Artiodactyla have the highest residual weaning mass
+```
+
+#### Step 6 
+
+Run models and a model selection process to evaluate what (now log transformed) variables best predict each of the two response variables, maxlife(mo) and AFR(mo), from the set of the following predictors: gestation(mo), newborn(g), weaning(mo), weanmass(g), litters/year, and overall body mass(g).
+
+For each of the two response variables, indicate what is the best model overall based on AICc and how many models have a delta AICc of 4 or less?
+
+What variables, if any, appear in all of this set of “top” models?
+
+Calculate and plot the model-averaged coefficients and their CIs across this set of top models.
+
+```{r}
+library(MASS)
+library(AICcmodavg)
+library(MuMIn)
+
+d4 <- d2 %>%
+  drop_na(`gestation(mo)`, `newborn(g)`, `weaning(mo)`, `weanmass(g)`, `litters/year`, `mass(g)`) #drop NAs from predictor variables
+  
+d5 <- d4 %>%
+  drop_na(`maxlife(mo)`) #maxlife response variable dropped NAs
+
+m_null_life <- lm(data = d5, `maxlife(mo)` ~ 1)
+summary(m_null_life)
+
+add1(m_null_life, scope = .~. + `gestation(mo)` + `newborn(g)` + `weaning(mo)` + `weanmass(g)` + `litters/year` + `mass(g)`, test = "F")
+
+m1 <- update(m_null_life, formula = .~. + `gestation(mo)`)
+summary(m1)
+
+add1(m1, scope = .~. + `newborn(g)` + `weaning(mo)` + `weanmass(g)` + `litters/year` + `mass(g)`, test = "F")
+
+m2 <- update(m1, formula = . ~ . +`litters/year`)
+summary(m2)
+
+add1(m2, scope = .~. + `newborn(g)` + `weaning(mo)` + `weanmass(g)` + `mass(g)`, test = "F")
+
+m3 <- update(m2, formula. = .~. + `mass(g)`)
+summary(m3)
+
+add1(m3, scope = .~. + `newborn(g)` + `weaning(mo)` + `weanmass(g)`, test = "F")
+
+m4 <- update(m3, formula. = .~. + `weaning(mo)`)
+summary(m4)
+
+add1(m4, scope = .~. + `newborn(g)` + `weanmass(g)`, test = "F") #these variables do not improve the fit of the model significantly, so the best model is m4
+
+summary(m4)
+
+d6 <- d4 %>%
+  drop_na(`AFR(mo)`) #AFR response variable dropped NAs
+
+m_null_AFR <- lm(data = d6, `AFR(mo)` ~ 1)
+summary(m_null_AFR)
+
+add1(m_null_AFR, scope = .~. + `gestation(mo)` + `newborn(g)` + `weaning(mo)` + `weanmass(g)` + `litters/year` + `mass(g)`, test = "F")
+
+
+m5 <- update(m_null_AFR, formula = .~. + `litters/year`)
+summary(m5)
+
+add1(m5, scope = .~. + `gestation(mo)` + `newborn(g)` + `weaning(mo)` + `weanmass(g)` + `mass(g)`, test = "F")
+
+m6 <- update(m5,  formula = .~. + `gestation(mo)`)
+summary(m6)
+
+add1(m6, scope = .~. + `newborn(g)` + `weaning(mo)` + `weanmass(g)` + `mass(g)`, test = "F") #three variables weakly add more explanitory variables, weanmass has the highest F value
+
+
+m7 <- update(m6, formula = .~. + `weanmass(g)`)
+summary(m7)
+
+add1(m7, scope = .~. + `newborn(g)` + `weaning(mo)` + `mass(g)`, test = "F")
+
+m8 <- update(m7, formula = .~. + `weaning(mo)`)
+summary(m8)
+
+add1(m8, scope = .~. + `newborn(g)` + `mass(g)`, test = "F")
+
+#the rest of the variables do not significantly improve the fit, the vest model is m8
+
+summary(m8)
+
+
+
+
+
+#why do I want to drop NAs before running the models? 
+
+```
+
